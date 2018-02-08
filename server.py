@@ -2,41 +2,57 @@ import socket
 import select
 
 
+ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto=0)
+ss.bind(('127.0.0.1', 59599))
+# by default is sets to socket.SOMAXCONN
+ss.listen()
+# set non-blocking mode
+ss.setblocking(0)
+ep = select.epoll()
+# register event for connection to server socket
+ep.register(ss.fileno(), select.EPOLLIN)
+conns = {}
+
 def shake_hands():
     """Shake hands with client by websocket rules.
     """
 
 
-s_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto=0)
-s_sock.bind(('127.0.0.1', 59599))
-# by default is sets to socket.SOMAXCONN
-s_sock.listen()
-# set non-blocking mode
-s_sock.setblocking(0)
-ep = select.epoll()
-# register event for connection to server socket
-ep.register(s_sock.fileno(), select.EPOLLIN)
-connections = {}
+def close_conn(fd):
+    """Close connection, unregister from events
+    and del connection from cons
+    """
+    ep.unregister(fd)
+    conns[fd].close()
+    del conns[fd]
 
-while True:
-    events = ep.poll()
-    for fd, ev in events:
-        if fd == s_sock.fileno():
-            c_sock, c_addr = s_sock.accept()
-            print('client connected, addr: %s' % (c_addr,))
-            c_sock.setblocking(0)
-            ep.register(c_sock.fileno(), select.EPOLLIN)
-            connections[c_sock.fileno()] = c_sock
-        elif ev and select.EPOLLHUP:
-            # client disonnected
-            print('client disconnected')
-            ep.unregister(fd)
-            connections[fd].close()
-            del connections[fd]
-        elif ev and select.EPOLLIN:
-            # data arrived from client
-            print('reecived %s' % connections[fd].recv(1024))
-        elif ev and select.EPOLLOUT:
-            # it is able to send data to client
-            print('epollout')
+try:
+    while True:
+        events = ep.poll()
+        for fd, ev in events:
+            if fd == ss.fileno():
+                cs, addr = ss.accept()
+                print('client connected, addr: %s' % (addr,))
+                cs.setblocking(0)
+                ep.register(cs.fileno(), select.EPOLLIN)
+                conns[cs.fileno()] = cs
+            elif ev & select.EPOLLHUP:
+                # hang up happened
+                print('hang up')
+                close_conn(fd)
+            elif ev & select.EPOLLERR:
+                # error condition happened
+                print('error')
+                close_conn(fd)
+            elif ev & select.EPOLLIN:
+                # data arrived from client
+                data = conns[fd].recv(1024)
+                print('recived %s' % data)
+                if not data:
+                    print('client disconnected')
+                    close_conn(fd)
+finally:
+    ep.unregister(ss.fileno())
+    ep.close()
+    ss.close()
 

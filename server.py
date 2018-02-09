@@ -36,13 +36,8 @@ try:
                 cs.setblocking(0)
                 ep.register(cs.fileno(), select.EPOLLIN)
                 conns[cs.fileno()] = cs
-            elif ev & select.EPOLLHUP:
-                # hang up happened
-                print('hang up')
-                close_conn(fd)
-            elif ev & select.EPOLLERR:
-                # error condition happened
-                print('error')
+            elif ev & (select.EPOLLERR | select.EPOLLHUP):
+                # hang up or error  happened
                 close_conn(fd)
             elif ev & select.EPOLLIN:
                 # data arrived from client

@@ -15,9 +15,9 @@ ss.setblocking(0)
 ep = select.epoll()
 # register event for connection to server socket
 ep.register(ss.fileno(), select.EPOLLIN)
-conns = {}
+clients = {}
 
-def shake_hands(key, conn):
+def shake_hands(key, client):
     """Shake hands with client by websocket rules.
     """
     # calculating response as per protocol RFC
@@ -34,7 +34,8 @@ def shake_hands(key, conn):
         resp_key
     )
 
-    conn.send(resp)
+    client.cs.send(resp)
+    client.handshake = True
 
 
 def close_conn(fd):
@@ -42,8 +43,8 @@ def close_conn(fd):
     and del connection from cons
     """
     ep.unregister(fd)
-    conns[fd].close()
-    del conns[fd]
+    clients[fd].cs.close()
+    del clients[fd]
 
 
 def decode_frame(frame):
@@ -66,7 +67,7 @@ def decode_frame(frame):
     return payload
 
 
-def send_frame(payload, conn):
+def send_frame(payload, client):
     # setting fin to 1 and opcpde to 0x1
     frame = [129]
     # adding len. no masking hence not doing +128
@@ -74,11 +75,15 @@ def send_frame(payload, conn):
     # adding payload
     frame_to_send = bytearray(frame) + payload
 
-    conn.send(frame_to_send)
+    client.cs.send(frame_to_send)
 
 
 class Client:
-    pass
+    # need status (in connecting, after handshake, online ...)
+    def __init__(self, cs):
+        self.handshake = False
+        self.cs = cs
+
 
 # TODO: distinguish connection that are upgraded (make Client class???)
 try:
@@ -90,38 +95,42 @@ try:
                 print('client connected, addr: %s' % (addr,))
                 cs.setblocking(0)
                 ep.register(cs.fileno(), select.EPOLLIN)
-                conns[cs.fileno()] = cs
+                clients[cs.fileno()] = Client(cs)
             elif ev & (select.EPOLLERR | select.EPOLLHUP):
                 # hang up or error  happened
                 close_conn(fd)
             elif ev & select.EPOLLIN:
                 # data arrived from client
-                data = conns[fd].recv(1024)
+                data = clients[fd].cs.recv(1024)
                 print('recived %s' % data)
                 if not data:
                     print('client disconnected')
                     close_conn(fd)
                 # make handshake
-                headers = data.split(b'\r\n')
-                if b'Connection: Upgrade' in data and \
-                        b'Upgrade: websocket' in data:
-                    print('!!! websocket upgrade request')
-                    for h in headers:
-                        if b'Sec-WebSocket-Key' in h:
-                            key = h.split(b' ')[1]
-                            break
-                    shake_hands(key, conns[fd])
-                else:
-                    print('!!! bad request')
-                    conns[fd].send(
-                        b'%s\r\n%s\r\n%s\r\n\r\n%s' % (
-                        b'HTTP/1.1 400 Bad Request',
-                        b'Content-Type: text/plain',
-                        b'Connection: close',
-                        b'Incorrect request'
+                if not clients[fd].handshake:
+                    headers = data.split(b'\r\n')
+                    if b'Connection: Upgrade' in data and \
+                            b'Upgrade: websocket' in data:
+                        print('!!! websocket upgrade request')
+                        for h in headers:
+                            if b'Sec-WebSocket-Key' in h:
+                                key = h.split(b' ')[1]
+                                break
+                        shake_hands(key, clients[fd])
+                    else:
+                        print('!!! bad request')
+                        clients[fd].cs.send(
+                            b'%s\r\n%s\r\n%s\r\n\r\n%s' % (
+                            b'HTTP/1.1 400 Bad Request',
+                            b'Content-Type: text/plain',
+                            b'Connection: close',
+                            b'Incorrect request'
+                            )
                         )
-                    )
-                    close_conn(fd)
+                        close_conn(fd)
+                else:
+                    data = decode_frame(bytearray(data))
+                    send_frame(data, clients[fd])
 finally:
     ep.unregister(ss.fileno())
     ep.close()

@@ -17,38 +17,43 @@ ep = select.epoll()
 ep.register(ss.fileno(), select.EPOLLIN)
 clients = {}
 
+
 def shake_hands(key, client):
     """Shake hands with client by websocket rules.
+
+    :param key: websocket key
+    :param client: client object
     """
     # calculating response as per protocol RFC
-    key = key + WS_MAGIC_STRING
+    key += WS_MAGIC_STRING
     resp_key = base64.standard_b64encode(
         hashlib.sha1(key).digest()
     )
 
-    resp = b'%s\r\n%s\r\n%s\r\n%s %s\r\n\r\n' % (
-        b'HTTP/1.1 101 Switching Protocols',
-        b'Upgrade: websocket',
-        b'Connection: Upgrade',
-        b'Sec-WebSocket-Accept:',
-        resp_key
-    )
+    resp = b'HTTP/1.1 101 Switching Protocols\r\n' \
+           b'Upgrade: websocket\r\n' \
+           b'Connection: Upgrade\r\n' \
+           b'Sec-WebSocket-Accept: %s\r\n\r\n' % resp_key
 
     client.cs.send(resp)
     client.handshake = True
 
 
-def close_conn(fd):
+def close_conn(file_descriptor):
     """Close connection, unregister from events
     and del connection from cons
+
+    :param file_descriptor: is used as key for clients dictionary and for
+        unregister from epoll
     """
-    ep.unregister(fd)
-    clients[fd].cs.close()
-    del clients[fd]
+    ep.unregister(file_descriptor)
+    clients[file_descriptor].cs.close()
+    del clients[file_descriptor]
 
 
 def decode_frame(frame):
     opcode_and_fin = frame[0]
+    print('!!! opcode_and_fin', opcode_and_fin)
 
     # assuming it's masked, hence removing the mask bit(MSB) to get len.
     # also assuming len is <125
@@ -59,7 +64,7 @@ def decode_frame(frame):
 
     payload = bytearray(
         [
-            encrypted_payload[i] ^ mask[i%4]
+            encrypted_payload[i] ^ mask[i % 4]
             for i in range(payload_len)
         ]
     )
@@ -68,7 +73,7 @@ def decode_frame(frame):
 
 
 def send_frame(payload, client):
-    # setting fin to 1 and opcpde to 0x1
+    # setting fin to 1 and opcode to 0x1
     frame = [129]
     # adding len. no masking hence not doing +128
     frame += [len(payload)]
@@ -80,12 +85,12 @@ def send_frame(payload, client):
 
 class Client:
     # need status (in connecting, after handshake, online ...)
-    def __init__(self, cs):
+    def __init__(self, client_socket):
         self.handshake = False
-        self.cs = cs
+        self.cs = client_socket
 
 
-# TODO: distinguish connection that are upgraded (make Client class???)
+# TODO: closing connections when clietn os closed websocket
 try:
     while True:
         events = ep.poll()
@@ -102,31 +107,35 @@ try:
             elif ev & select.EPOLLIN:
                 # data arrived from client
                 data = clients[fd].cs.recv(1024)
-                print('recived %s' % data)
+                print('received %s' % data)
                 if not data:
                     print('client disconnected')
                     close_conn(fd)
                 # make handshake
                 if not clients[fd].handshake:
                     headers = data.split(b'\r\n')
-                    if b'Connection: Upgrade' in data and \
-                            b'Upgrade: websocket' in data:
+                    if b'Connection: Upgrade' in headers and \
+                            b'Upgrade: websocket' in headers:
                         print('!!! websocket upgrade request')
                         for h in headers:
                             if b'Sec-WebSocket-Key' in h:
-                                key = h.split(b' ')[1]
+                                shake_hands(h.split(b' ')[1], clients[fd])
                                 break
-                        shake_hands(key, clients[fd])
+                        else:
+                            print(
+                                '!!! bad request, no websocket key in headers'
+                            )
+                            bad_request = b'HTTP/1.1 400 Bad Request\r\n' \
+                                          b'Content-Type: text/plain\r\n' \
+                                          b'Connection: close\r\n\r\n'
+                            clients[fd].cs.send(bad_request)
+                            close_conn(fd)
                     else:
                         print('!!! bad request')
-                        clients[fd].cs.send(
-                            b'%s\r\n%s\r\n%s\r\n\r\n%s' % (
-                            b'HTTP/1.1 400 Bad Request',
-                            b'Content-Type: text/plain',
-                            b'Connection: close',
-                            b'Incorrect request'
-                            )
-                        )
+                        bad_request = b'HTTP/1.1 400 Bad Request\r\n' \
+                                      b'Content-Type: text/plain\r\n' \
+                                      b'Connection: close\r\n\r\n'
+                        clients[fd].cs.send(bad_request)
                         close_conn(fd)
                 else:
                     data = decode_frame(bytearray(data))
@@ -135,4 +144,3 @@ finally:
     ep.unregister(ss.fileno())
     ep.close()
     ss.close()
-

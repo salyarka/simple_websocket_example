@@ -39,9 +39,11 @@ try:
                 cs.setblocking(0)
                 ep.register(cs.fileno(), select.EPOLLIN)
                 clients[cs.fileno()] = Client(cs)
+
             elif ev & (select.EPOLLERR | select.EPOLLHUP):
                 # hang up or error  happened
                 close_conn(fd)
+
             elif ev & select.EPOLLIN:
                 # data arrived from client
                 data = clients[fd].recv()
@@ -50,19 +52,27 @@ try:
                     print('client disconnected')
                     close_conn(fd)
                 # make handshake
-                # TODO: register for epoll out for send messages
                 if not clients[fd].handshake:
                     k = get_key(data)
                     if k is None:
                         print('!!! bad request')
-                        clients[fd].cs.send(BAD_REQUEST)
+                        clients[fd].send(BAD_REQUEST)
                         close_conn(fd)
                     else:
+                        # TODO: redesign code, client class should nothing know
+                        # about websocket
                         clients[fd].shake_hands(k)
                 else:
+                    # TODO: redesign decode_frame and prepare_data
                     data = decode_frame(bytearray(data))
                     data = prepare_data(data)
-                    clients[fd].send(data)
+                    clients[fd].last_message = data
+                    ep.modify(fd, select.EPOLLOUT)
+
+            elif ev & select.EPOLLOUT:
+                clients[fd].send(clients[fd].last_message)
+                ep.modify(fd, select.EPOLLIN)
+
 finally:
     ep.unregister(ss.fileno())
     ep.close()

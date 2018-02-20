@@ -39,9 +39,16 @@ def get_key(request):
 
 
 def decode_frame(frame):
+    print('!!! len frame', len(frame))
+    for i, each in enumerate(frame):
+        print('!!! index %s value %s type %s' % (i, each, type(each)))
+    print('!!! frame', frame)
+    frame = bytearray(frame)
+    # TODO: redesign, temporary solution
+    f_and_op = '{0:b}'.format(frame[0])
+    if f_and_op[4:] == '1000':
+        return 'close'
     opcode_and_fin = frame[0]
-    print('!!! opcode_and_fin', opcode_and_fin)
-
     # assuming it's masked, hence removing the mask bit(MSB) to get len.
     # also assuming len is <125
     payload_len = frame[1] - 128

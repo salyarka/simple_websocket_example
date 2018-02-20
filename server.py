@@ -6,6 +6,8 @@ from ws import get_key, prepare_data, decode_frame, BAD_REQUEST
 
 
 ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto=0)
+# reuse existing socket
+ss.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 ss.bind(('127.0.0.1', 59599))
 # by default is sets to socket.SOMAXCONN
 ss.listen()
@@ -64,10 +66,15 @@ try:
                         clients[fd].shake_hands(k)
                 else:
                     # TODO: redesign decode_frame and prepare_data
-                    data = decode_frame(bytearray(data))
-                    data = prepare_data(data)
-                    clients[fd].last_message = data
-                    ep.modify(fd, select.EPOLLOUT)
+                    data = decode_frame(data)
+                    if data == 'close':
+                        print('clients before', clients)
+                        close_conn(fd)
+                        print('client after', clients)
+                    else:
+                        data = prepare_data(data)
+                        clients[fd].last_message = data
+                        ep.modify(fd, select.EPOLLOUT)
 
             elif ev & select.EPOLLOUT:
                 clients[fd].send(clients[fd].last_message)

@@ -67,7 +67,7 @@ try:
                 else:
                     # TODO: redesign decode_frame and prepare_data
                     data = decode_frame(data)
-                    if data == 'close':
+                    if data is None:
                         print('clients before', clients)
                         close_conn(fd)
                         print('client after', clients)

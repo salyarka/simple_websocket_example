@@ -12,6 +12,8 @@ BAD_REQUEST = b'HTTP/1.1 400 Bad Request\r\n' \
               b'Content-Type: text/plain\r\n' \
               b'Connection: close\r\n\r\n'
 
+OPCODE = (0x1, 0x2, 0x8, 0x9, 0xA, 0x0)
+
 
 def make_handshake_response(key):
     # calculating response as per protocol RFC
@@ -39,16 +41,10 @@ def get_key(request):
 
 
 def decode_frame(frame):
-    print('!!! len frame', len(frame))
-    for i, each in enumerate(frame):
-        print('!!! index %s value %s type %s' % (i, each, type(each)))
-    print('!!! frame', frame)
     frame = bytearray(frame)
-    # TODO: redesign, temporary solution
-    f_and_op = '{0:b}'.format(frame[0])
-    if f_and_op[4:] == '1000':
-        return 'close'
     opcode_and_fin = frame[0]
+    if opcode_and_fin & 0xf == 0x8:
+        return
     # assuming it's masked, hence removing the mask bit(MSB) to get len.
     # also assuming len is <125
     payload_len = frame[1] - 128

@@ -1,8 +1,21 @@
 import socket
 import select
 
-from client import Client
-from ws import get_key, prepare_data, decode_frame, BAD_REQUEST
+from connection import Connection
+from ws import get_key, prepare_data, decode_frame, make_handshake_response, \
+        BAD_REQUEST
+
+
+def close_conn(file_descriptor):
+    """Close connection, unregister from events
+    and del client object.
+
+    :param file_descriptor: is used as key for clients dictionary and for
+        unregister from epoll
+    """
+    ep.unregister(file_descriptor)
+    clients[file_descriptor].disconnect()
+    del clients[file_descriptor]
 
 
 ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto=0)
@@ -18,19 +31,6 @@ ep = select.epoll()
 ep.register(ss.fileno(), select.EPOLLIN)
 clients = {}
 
-
-def close_conn(file_descriptor):
-    """Close connection, unregister from events
-    and del client object.
-
-    :param file_descriptor: is used as key for clients dictionary and for
-        unregister from epoll
-    """
-    ep.unregister(file_descriptor)
-    clients[file_descriptor].disconnect()
-    del clients[file_descriptor]
-
-# TODO: closing connections when clietn os closed websocket
 try:
     while True:
         events = ep.poll()
@@ -40,7 +40,7 @@ try:
                 print('client connected, addr: %s' % (addr,))
                 cs.setblocking(0)
                 ep.register(cs.fileno(), select.EPOLLIN)
-                clients[cs.fileno()] = Client(cs)
+                clients[cs.fileno()] = Connection(cs)
 
             elif ev & (select.EPOLLERR | select.EPOLLHUP):
                 # hang up or error  happened
@@ -61,18 +61,19 @@ try:
                         clients[fd].send(BAD_REQUEST)
                         close_conn(fd)
                     else:
-                        # TODO: redesign code, client class should nothing know
-                        # about websocket
-                        clients[fd].shake_hands(k)
+                        r = make_handshake_response(k)
+                        clients[fd].send(r)
+                        clients[fd].handshake = True
                 else:
                     # TODO: redesign decode_frame and prepare_data
                     data = decode_frame(data)
                     if data is None:
-                        print('clients before', clients)
+                        # client closed the connection
                         close_conn(fd)
-                        print('client after', clients)
                     else:
                         data = prepare_data(data)
+                        # remember the last message, to reply echo,
+                        # when socket is ready
                         clients[fd].last_message = data
                         ep.modify(fd, select.EPOLLOUT)
 

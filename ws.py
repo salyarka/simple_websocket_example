@@ -12,11 +12,12 @@ BAD_REQUEST = b'HTTP/1.1 400 Bad Request\r\n' \
               b'Content-Type: text/plain\r\n' \
               b'Connection: close\r\n\r\n'
 
-OPCODE = (0x1, 0x2, 0x8, 0x9, 0xA, 0x0)
-
 
 def make_handshake_response(key):
-    # calculating response as per protocol RFC
+    """Creates handshake response for client.
+
+    :param key: websocket key
+    """
     key += WS_MAGIC_STRING
     resp_key = base64.standard_b64encode(
         hashlib.sha1(key).digest()
@@ -41,16 +42,19 @@ def get_key(request):
 
 
 def decode_frame(frame):
+    """Decodes frame, considered only opcode for closing connection.
+
+    :param frame: websocket frame from client
+    """
     frame = bytearray(frame)
-    opcode_and_fin = frame[0]
-    if opcode_and_fin & 0xf == 0x8:
+    fin_and_opcode = frame[0]
+    if fin_and_opcode & 0xf == 0x8:
+        # opcode 8 - Connection Close Frame
         return
-    # assuming it's masked, hence removing the mask bit(MSB) to get len.
-    # also assuming len is <125
     payload_len = frame[1] - 128
 
     mask = frame[2:6]
-    encrypted_payload = frame[6: 6+payload_len]
+    encrypted_payload = frame[6:6 + payload_len]
 
     payload = bytearray(
         [
@@ -65,10 +69,8 @@ def decode_frame(frame):
 def prepare_data(payload):
     # setting fin to 1 and opcode to 0x1
     frame = [129]
-    # adding len. no masking hence not doing +128
     frame += [len(payload)]
-    # adding payload
-    frame_to_send = bytearray(frame) + payload
+    result_frame = bytearray(frame) + payload
 
-    return frame_to_send
+    return result_frame
 

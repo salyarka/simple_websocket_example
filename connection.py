@@ -1,6 +1,3 @@
-from ws import make_handshake_response
-
-
 class Connection:
     def __init__(self, client_socket):
         self.__cs = client_socket
@@ -15,4 +12,3 @@ class Connection:
 
     def send(self, data):
         self.__cs.send(data)
-

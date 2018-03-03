@@ -85,4 +85,3 @@ finally:
     ep.unregister(ss.fileno())
     ep.close()
     ss.close()
-
